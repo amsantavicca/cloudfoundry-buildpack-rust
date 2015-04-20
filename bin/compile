@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+# Copyright 2015 Aaron M Santavicca <amsantav@us.ibm.com>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# bin/compile <BUILD_DIR> <CACHE_DIR>
+
+# First, make sure the directories we've been given exist
+mkdir -p "$1" "$2"
+
+BUILD=$(cd "$1/" && pwd)
+CACHE=$(cd "$2/" && pwd)
+BPDIR=$(dirname $(dirname $0))
+
+# Filename and URL of our binary
+RUST_FILE="rust-1.0.0-beta.2-x86_64-unknown-linux-gnu.tar.gz"
+RUST_URL="http://static.rust-lang.org/dist/$RUST_FILE"
+
+# Download directory, install directory, and Cargo cache directory
+RUST_ROOT=$CACHE/rust
+RUST_PATH=$BUILD/rust-install
+CARGO_HOME=$BUILD/.cargo
+
+# Double check that we have a Cargo.toml
+if [[ ! -f "$BUILD/Cargo.toml" ]]; then
+    echo "Cargo.toml is required."
+    exit 1
+fi
+
+echo "Checking for Rust"
+
+if [[ -d "$CACHE/rust" ]]; then
+    echo "Using $(cat $RUST_ROOT/version)"
+else
+    rm -rf $RUST_ROOT
+    mkdir -p $RUST_ROOT
+
+    # Download the most recent, recommended version of Rust
+    echo "Downloading Rust"
+    curl -sO $RUST_URL
+
+    tar -C $RUST_ROOT -xzf $RUST_FILE --strip-components=1
+
+    rm -f $RUST_FILE
+fi
+
+echo "Installing Rust"
+$RUST_ROOT/install.sh --prefix="$RUST_PATH" --disable-ldconfig
+
+# Set up the DYLD_LIBRARY_PATH and LD_LIBRARY_PATH
+# since we had to do a local Rust install
+RUST_DYLD=$RUST_PATH/lib/rustlib/x86_64-unknown-linux-gnu/lib
+if [[ -d "$RUST_DYLD" ]]; then
+    if [[ -z "$DYLD_LIBRARY_PATH" ]]; then
+        export DYLD_LIBRARY_PATH=$RUST_DYLD
+    else
+        export DYLD_LIBRARY_PATH=$RUST_DYLD:$DYLD_LIBRARY_PATH
+    fi
+fi
+
+export PATH=$RUST_PATH/bin:$PATH
+export LD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
+
+echo "Compiling"
+
+# Get application specific build instructions from "CARGO_BUILD_FLAGS"
+# environment variable specified in the application's 'manifest.yml'
+# If the variable is unset or empty, we'll build just build using
+# `cargo build --release`
+: ${CARGO_BUILD_FLAGS:="build --release"}
+
+cd $BUILD && cargo ${CARGO_BUILD_FLAGS}
+
+# If the START_COMMAND isn't set, use the application name as specified in the
+# VCAP_APPLICATION environment variable
+if [[ -z "$START_COMMAND" ]]; then
+    # I don't like long lines, split what should be a one-liner into three
+    APP=$(echo $VCAP_APPLICATION | tr ',' '\n' | grep "application_name")
+    APP=$(echo $APP | cut -d':' -f2 | tr -d '"')
+    START_COMMAND="./target/release/$APP"
+fi
+
+# Modify the bin/release script with the start command
+sed -i "s@web: EMPTY@web: $START_COMMAND@" $BPDIR/bin/release
