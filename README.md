@@ -9,7 +9,7 @@ but should would well with any PaaS based on the CloudFoundry stack.
 ##What does this buildpack do?
 
 This buildpack downloads and installs the latest recommended version of Rust
-(currently 1.0.0).
+(currently 1.5.0).
 
 Then, it will compile your application using the `cargo` command plus whatever
 build flags you specify in your application's `manifest.yml`.
