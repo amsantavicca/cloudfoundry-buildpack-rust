@@ -24,7 +24,7 @@ CACHE=$(cd "$2/" && pwd)
 BPDIR=$(dirname $(dirname $0))
 
 # Filename and URL of our binary
-RUST_FILE="rust-1.6.0-x86_64-unknown-linux-gnu.tar.gz"
+RUST_FILE="rust-1.7.0-x86_64-unknown-linux-gnu.tar.gz"
 RUST_URL="http://static.rust-lang.org/dist/$RUST_FILE"
 
 # Download directory, install directory, and Cargo cache directory
