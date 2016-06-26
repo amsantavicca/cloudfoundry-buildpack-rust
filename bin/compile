@@ -14,82 +14,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# bin/compile <BUILD_DIR> <CACHE_DIR>
+# Let's not break everything accidentally
+set -eu
+set -o pipefail
 
-# First, make sure the directories we've been given exist
-mkdir -p "$1" "$2"
+# This script is run as 'bin/compile <BUILD_DIR> <CACHE_DIR>'
+# Make sure the BUILD_DIR exists, don't worry about the CACHE_DIR for now
+mkdir -p "$1"
 
-BUILD=$(cd "$1/" && pwd)
-CACHE=$(cd "$2/" && pwd)
-BPDIR=$(dirname $(dirname $0))
-
-# Filename and URL of our binary
-RUST_FILE="rust-1.9.0-x86_64-unknown-linux-gnu.tar.gz"
-RUST_URL="http://static.rust-lang.org/dist/$RUST_FILE"
-
-# Download directory, install directory, and Cargo cache directory
-RUST_ROOT=$CACHE/rust
-RUST_PATH=$BUILD/rust-install
-CARGO_HOME=$BUILD/.cargo
+build=$(cd "$1/" && pwd)
+bpdir=$(dirname $(dirname "$0"))
 
 # Double check that we have a Cargo.toml
-if [[ ! -f "$BUILD/Cargo.toml" ]]; then
+if [[ ! -f "$build/Cargo.toml" ]]; then
     echo "Cargo.toml is required."
     exit 1
 fi
 
-echo "Checking for Rust"
+# Get our args for rustup-init in order
+toolchain=${RUST_TOOLCHAIN:-"stable"}
+verbosity=${RUSTUP_VERBOSE:+"-v"}
+custom_args=${RUSTUP_CUSTOM:-""}
+rustup_args="${custom_args:-"${verbosity:-""} --default-toolchain $toolchain"}"
 
-if [[ -d "$CACHE/rust" ]]; then
-    echo "Using $(cat $RUST_ROOT/version)"
-else
-    rm -rf $RUST_ROOT
-    mkdir -p $RUST_ROOT
+# Install Rust toolchain
+curl https://sh.rustup.rs -sSf | sh -s -- -y ${rustup_args}
 
-    # Download the most recent, recommended version of Rust
-    echo "Downloading Rust"
-    curl -sO $RUST_URL
+# Make sure .cargo/bin is on the path
+path_to_cargo="$HOME/.cargo/bin/"
+export PATH=$path_to_cargo:$PATH
 
-    tar -C $RUST_ROOT -xzf $RUST_FILE --strip-components=1
+# Do the build
+cd "$build"
+cargo build ${CARGO_BUILD_FLAGS:-"--release"}
 
-    rm -f $RUST_FILE
-fi
-
-echo "Installing Rust"
-$RUST_ROOT/install.sh --prefix="$RUST_PATH" --disable-ldconfig
-
-# Set up the DYLD_LIBRARY_PATH and LD_LIBRARY_PATH
-# since we had to do a local Rust install
-RUST_DYLD=$RUST_PATH/lib/rustlib/x86_64-unknown-linux-gnu/lib
-if [[ -d "$RUST_DYLD" ]]; then
-    if [[ -z "$DYLD_LIBRARY_PATH" ]]; then
-        export DYLD_LIBRARY_PATH=$RUST_DYLD
-    else
-        export DYLD_LIBRARY_PATH=$RUST_DYLD:$DYLD_LIBRARY_PATH
-    fi
-fi
-
-export PATH=$RUST_PATH/bin:$PATH
-export LD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
-
-echo "Compiling"
-
-# Get application specific build instructions from "CARGO_BUILD_FLAGS"
-# environment variable specified in the application's 'manifest.yml'
-# If the variable is unset or empty, we'll build just build using
-# `cargo build --release`
-: ${CARGO_BUILD_FLAGS:="build --release"}
-
-cd $BUILD && cargo ${CARGO_BUILD_FLAGS}
-
-# If the START_COMMAND isn't set, use the application name as specified in the
-# VCAP_APPLICATION environment variable
+# Determine a default start command
 if [[ -z "$START_COMMAND" ]]; then
-    # I don't like long lines, split what should be a one-liner into three
     APP=$(echo $VCAP_APPLICATION | tr ',' '\n' | grep "application_name")
     APP=$(echo $APP | cut -d':' -f2 | tr -d '"')
     START_COMMAND="./target/release/$APP"
 fi
 
 # Modify the bin/release script with the start command
-sed -i "s@web: EMPTY@web: $START_COMMAND@" $BPDIR/bin/release
+sed -i "s@web: EMPTY@web: $START_COMMAND@" $bpdir/bin/release
